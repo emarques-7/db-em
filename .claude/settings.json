@@ -1,0 +1,6 @@
+{
+  "skills": [
+    ".claude/skills/prisma-db.md",
+    ".claude/skills/db-schema-design.md"
+  ]
+}
