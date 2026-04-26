@@ -135,11 +135,26 @@ Then interpret:
 
 - Migration file names must be descriptive: `add_indexes_candidate_relations`, `add_cascade_delete_candidate`
 - Never edit an already-applied migration file
-- Raw SQL in migrations is acceptable for operations Prisma cannot express (e.g., partial indexes, `CREATE EXTENSION`, `CONCURRENTLY` index builds)
-- Example partial index (add inside a migration SQL block):
+- Raw SQL in migrations is acceptable for operations Prisma cannot express (e.g., partial indexes, `CREATE EXTENSION`)
+- Example partial index (add inside a migration SQL block — note: no `CONCURRENTLY` here because Prisma wraps migrations in a transaction):
   ```sql
-  CREATE INDEX CONCURRENTLY idx_education_candidate_id ON "education"("candidateId");
+  CREATE INDEX idx_education_open_endDate ON "education"("candidateId") WHERE "endDate" IS NULL;
   ```
+- **`CREATE INDEX CONCURRENTLY` cannot run inside a migration transaction.** Prisma wraps each migration in `BEGIN`/`COMMIT`, and PostgreSQL rejects `CONCURRENTLY` inside a transaction block. To build a concurrent index without locking the table:
+  1. Apply the index out-of-band:
+     ```bash
+     npx prisma db execute --file concurrent_index.sql
+     ```
+     where `concurrent_index.sql` contains:
+     ```sql
+     CREATE INDEX CONCURRENTLY idx_name ON "table"("column");
+     ```
+  2. Create an empty migration to record the change in Prisma's migration history:
+     ```bash
+     npx prisma migrate dev --name add_concurrent_idx --create-only
+     # Leave the generated migration.sql empty (or add a comment), then:
+     npx prisma migrate deploy
+     ```
 
 ### 9. Output format
 
@@ -164,6 +179,6 @@ This skill is calibrated for the LTI Talent Tracking System:
   - **PrismaClient singleton missing** — `new PrismaClient()` called independently in `Candidate.ts`, `Education.ts`, `WorkExperience.ts`, `Resume.ts`, `index.ts`, and `Education.test.ts`; exhausts the connection pool under load
   - **N+1 in `addCandidate`** — sequential `for` loops with individual `await educationModel.save()`, `await experienceModel.save()`, and `await resumeModel.save()` calls; should use nested `createMany` in a single transaction
   - **`Candidate.findOne` missing `include`** — calls `prisma.candidate.findUnique` with no `include` or `select`; returns a bare candidate with no related `educations`, `workExperiences`, or `resumes`
-  - **Missing standalone index on `Application.candidateId`** — only a composite `@@unique([candidateId, positionId])` exists; queries filtering by `candidateId` alone (e.g., "all applications for a candidate") will not use that index
+  - ~~**Missing standalone index on `Application.candidateId`**~~ — Resolved: `@@index([candidateId])` was added to `Application` in the enhanced ATS schema migration alongside the composite `@@unique([candidateId, positionId])`
 - DB credentials live in `.env` (never commit changes to that file)
 - All schema changes go through `prisma migrate dev` — never alter the DB directly
